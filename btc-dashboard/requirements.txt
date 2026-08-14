@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+aiohttp
+pydantic
+jinja2
+python-dotenv
+pydantic-settings
+python-json-logger
+prometheus_client
