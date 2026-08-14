@@ -5,7 +5,7 @@ import os
 import uuid
 from pythonjsonlogger import jsonlogger
 from prometheus_client import Counter, Histogram, make_asgi_app, REGISTRY
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 import jinja2
 from jinja2 import select_autoescape
 from fastapi.staticfiles import StaticFiles
@@ -32,6 +32,11 @@ from app.services.cache import MetricsCache
 from fastapi import WebSocket, WebSocketDisconnect
 import asyncio
 import json
+import hmac
+import hashlib
+from datetime import datetime, timedelta
+from fastapi import HTTPException
+from fastapi.responses import JSONResponse
 
 
 templates = Jinja2Templates(directory=str(project_root / "app" / "templates"))
@@ -239,9 +244,28 @@ def create_app() -> FastAPI:
         mgr: 'ConnectionManager' = app.state.ws_manager
         settings = app.state.settings
 
-        # Simple token-based auth (optional). If WS_TOKEN is set, require it as ?token=... on the WebSocket URL
+        # Support HMAC short-lived tokens. If WS_SECRET is configured, expect a signed token
         token = websocket.query_params.get('token')
-        if getattr(settings, 'WS_TOKEN', None):
+        if getattr(settings, 'WS_SECRET', None):
+            if not token:
+                await websocket.close(code=1008)
+                return
+            # token format: <expires_ts>.<hex_signature>
+            try:
+                expires_s, sig = token.split('.')
+                expires = int(expires_s)
+            except Exception:
+                await websocket.close(code=1008)
+                return
+            if time.time() > expires:
+                await websocket.close(code=1008)
+                return
+            expected = hmac.new(settings.WS_SECRET.encode(), msg=str(expires_s).encode(), digestmod=hashlib.sha256).hexdigest()
+            if not hmac.compare_digest(expected, sig):
+                await websocket.close(code=1008)
+                return
+        elif getattr(settings, 'WS_TOKEN', None):
+            # fallback to static token for dev
             if not token or token != settings.WS_TOKEN:
                 await websocket.close(code=1008)
                 return
@@ -291,7 +315,30 @@ def create_app() -> FastAPI:
         # Render the template via Jinja2Templates (now using a no-cache env).
         # Note: TemplateResponse expects (request, name, context).
         # pass server WS token to client (may be empty)
-        return templates.TemplateResponse("index.html", {"request": request, "WS_TOKEN": settings.WS_TOKEN or ""})
+        # Render using the Jinja2 environment directly to avoid TemplateResponse signature ambiguity
+        tpl = templates.env.get_template("index.html")
+        # Do not embed WS_SECRET; if WS_SECRET is set, the frontend will call /ws-token
+        content = tpl.render({"request": request, "WS_TOKEN": (settings.WS_TOKEN or "") if not settings.WS_SECRET else ""})
+        return HTMLResponse(content)
+
+
+    @app.get('/ws-token')
+    async def ws_token(request: Request):
+        """Return a short-lived HMAC-signed token for WebSocket connections.
+
+        Response JSON: {"token": "<expires>.<sig>", "expires": <unix_ts>}
+        """
+        settings = app.state.settings
+        if not getattr(settings, 'WS_SECRET', None):
+            # not configured; fall back to static token if present
+            if getattr(settings, 'WS_TOKEN', None):
+                return JSONResponse({"token": settings.WS_TOKEN, "expires": None})
+            raise HTTPException(status_code=501, detail="WS token service not available")
+        # produce token valid for 60 seconds
+        expires = int(time.time() + 60)
+        sig = hmac.new(settings.WS_SECRET.encode(), msg=str(expires).encode(), digestmod=hashlib.sha256).hexdigest()
+        token = f"{expires}.{sig}"
+        return JSONResponse({"token": token, "expires": expires})
 
     return app
 

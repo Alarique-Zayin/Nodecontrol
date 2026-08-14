@@ -37,7 +37,7 @@ function createCard(key, value) {
     <div class="mt-1 flex items-center gap-4">
       <div class="text-2xl font-semibold" data-key-value>${fmt(value)}</div>
       <div class="flex-1">
-        <canvas class="spark-canvas" data-spark></canvas>
+        <div class="spark-canvas" data-spark></div>
       </div>
     </div>
   `;
@@ -116,9 +116,9 @@ async function fetchStatus() {
     (data.recent_blocks || []).slice(0,8).forEach(b=>{
       const node = document.createElement('div');
       node.className = 'p-2 bg-white dark:bg-gray-800 rounded flex items-center justify-between';
-      node.innerHTML = `<div class="flex items-center gap-3">
+              node.innerHTML = `<div class="flex items-center gap-3">
           <div class="text-sm font-medium truncate max-w-xs" title="${b.hash}">${truncateHash(b.hash)}</div>
-          <div class="text-xs text-gray-500 dark:text-gray-400">txs: ${b.tx_count} · feeRate: ${b.fee_rate || '-'} sat/vB</div>
+          <div class="text-xs text-gray-500 dark:text-gray-400">txs: ${b.tx_count}</div>
         </div>
         <div class="text-xs text-gray-400">${b.time ? new Date(b.time*1000).toLocaleTimeString() : ''}</div>`;
       node.querySelector('.truncate')?.addEventListener('click', ()=>copyText(b.hash));
@@ -202,13 +202,27 @@ function showSearchResult(data){
 
 // WebSocket stub for real-time updates (reconnects)
 function initWS(){
-  const token = window.WS_TOKEN || '';
-  const url = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws' + (token ? '?token='+encodeURIComponent(token) : '');
+  // prefer short-lived token from server if WS_TOKEN was not embedded
+  async function getToken(){
+    try{
+      if(window.WS_TOKEN) return window.WS_TOKEN;
+      const r = await fetch('/ws-token');
+      if(!r.ok) return '';
+      const j = await r.json();
+      return j.token || '';
+    }catch(e){ return ''; }
+  }
+
+  const scheme = (location.protocol === 'https:' ? 'wss://' : 'ws://');
+  let tokenPromise = getToken();
   let ws;
   let retry = 1000;
   function connect(){
-    try{
-      ws = new WebSocket(url);
+    tokenPromise.then(token=>{
+      const url = scheme + location.host + '/ws' + (token ? '?token='+encodeURIComponent(token) : '');
+      try{
+        ws = new WebSocket(url);
+      }catch(e){ setTimeout(connect, retry); retry = Math.min(30000, retry*1.5); return; }
       ws.onopen = ()=>{ console.debug('ws open'); retry = 1000; };
       ws.onmessage = (ev)=>{
         try{
@@ -234,9 +248,9 @@ function initWS(){
           }
         }catch(e){}
       };
-      ws.onclose = ()=>{ console.debug('ws closed, reconnecting'); setTimeout(connect, retry); retry = Math.min(30000, retry*1.5); };
+      ws.onclose = ()=>{ console.debug('ws closed, reconnecting'); setTimeout(()=>{ tokenPromise = getToken(); connect(); }, retry); retry = Math.min(30000, retry*1.5); };
       ws.onerror = ()=>{ ws.close(); };
-    }catch(e){ setTimeout(connect, retry); retry = Math.min(30000, retry*1.5); }
+    });
   }
   connect();
 }

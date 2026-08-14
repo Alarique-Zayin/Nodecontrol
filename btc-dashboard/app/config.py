@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     CORS_ORIGINS: str = "*"
     REDIS_URL: str | None = None
     WS_TOKEN: str | None = None
+    # HMAC secret used to sign short-lived WS tokens. Set in environment for production.
+    WS_SECRET: str | None = None
 
     class Config:
         env_file = ".env"
