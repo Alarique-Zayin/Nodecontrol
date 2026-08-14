@@ -1,0 +1,14 @@
+[Unit]
+Description=Bitcoin Node Dashboard
+After=network.target
+
+[Service]
+Type=simple
+User=cloud
+WorkingDirectory=/var/home/cloud/vscode/Nodecontrol/btc-dashboard
+ExecStart=/var/home/cloud/vscode/Nodecontrol/.venv/bin/python /var/home/cloud/vscode/Nodecontrol/btc-dashboard/run_server.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
