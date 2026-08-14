@@ -15,6 +15,22 @@ async def status(request: Request):
         best = await rpc.get_best_block_hash()
         mempool = await rpc.get_mempool_info()
         net = await rpc.get_network_info()
+        # build a small recent blocks feed (last 6)
+        recent = []
+        try:
+            for i in range(0, 6):
+                h = await rpc.get_block_hash(count - i)
+                b = await rpc.get_block(h, 1)
+                tx_count = len(b.get('tx', [])) if isinstance(b.get('tx', []), list) else 0
+                recent.append({
+                    'hash': h,
+                    'tx_count': tx_count,
+                    'time': b.get('time'),
+                })
+        except Exception:
+            # if RPC calls fail for blocks, ignore recent feed
+            recent = []
+
         return JSONResponse(
             {
                 "block_count": count,
@@ -24,6 +40,8 @@ async def status(request: Request):
                 "difficulty": info.get("difficulty"),
                 "mempool": mempool,
                 "network": net,
+                "peers": net.get('connections') if isinstance(net, dict) else None,
+                "recent_blocks": recent,
             }
         )
     except Exception as e:
