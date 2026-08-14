@@ -65,3 +65,33 @@ async def health(request: Request):
     except Exception as e:
         logger.warning("Health check failed: %s", e)
         return JSONResponse({"status": "unhealthy", "error": str(e)}, status_code=503)
+
+
+@router.get("/search")
+async def search(request: Request, q: str):
+    """Search for a block by height or hash, or return basic tx info when available.
+    - If `q` is numeric, treated as block height.
+    - If `q` looks like a 64-char hex, treated as block hash.
+    """
+    rpc = request.app.state.rpc_client
+    logger: logging.Logger = request.app.state.logger if hasattr(request.app.state, "logger") else logging.getLogger("btc-dashboard")
+    try:
+        # numeric -> block height
+        if q.isdigit():
+            height = int(q)
+            h = await rpc.get_block_hash(height)
+            b = await rpc.get_block(h, 1)
+            return JSONResponse({"type": "block", "block": b})
+
+        # 64 hex chars -> block hash
+        if len(q) == 64 and all(c in '0123456789abcdefABCDEF' for c in q):
+            try:
+                b = await rpc.get_block(q, 1)
+                return JSONResponse({"type": "block", "block": b})
+            except Exception:
+                return JSONResponse({"error": "block not found"}, status_code=404)
+
+        return JSONResponse({"error": "unsupported query. use block height or block hash"}, status_code=400)
+    except Exception as e:
+        logger.exception("Search error")
+        return JSONResponse({"error": str(e)}, status_code=500)
