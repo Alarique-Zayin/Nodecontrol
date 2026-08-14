@@ -28,6 +28,10 @@ else:
 
 from app.config import Settings
 from app.services.rpc import BitcoinRPCClient
+from app.services.cache import MetricsCache
+from fastapi import WebSocket, WebSocketDisconnect
+import asyncio
+import json
 
 
 templates = Jinja2Templates(directory=str(project_root / "app" / "templates"))
@@ -131,6 +135,67 @@ def create_app() -> FastAPI:
             cookie_path=settings.RPC_COOKIE_PATH,
             use_ssl=settings.USE_SSL,
         )
+        # init sqlite cache
+        data_dir = project_root / "data"
+        os.makedirs(data_dir, exist_ok=True)
+        app.state.cache = MetricsCache(data_dir / "metrics.db")
+
+        # websocket connection manager
+        class ConnectionManager:
+            def __init__(self):
+                self.active: set[WebSocket] = set()
+
+            async def connect(self, websocket: WebSocket):
+                await websocket.accept()
+                self.active.add(websocket)
+
+            def disconnect(self, websocket: WebSocket):
+                self.active.discard(websocket)
+
+            async def broadcast(self, message: str):
+                to_remove = []
+                for ws in list(self.active):
+                    try:
+                        await ws.send_text(message)
+                    except Exception:
+                        to_remove.append(ws)
+                for ws in to_remove:
+                    self.active.discard(ws)
+
+        app.state.ws_manager = ConnectionManager()
+
+        # background poller task - pushes metrics to WS and records to cache
+        async def poller():
+            rpc: BitcoinRPCClient = app.state.rpc_client
+            cache: MetricsCache = app.state.cache
+            mgr = app.state.ws_manager
+            interval = getattr(settings, 'POLL_INTERVAL', 2)
+            while True:
+                try:
+                    info = await rpc.get_blockchain_info()
+                    count = await rpc.get_block_count()
+                    best = await rpc.get_best_block_hash()
+                    mempool = await rpc.get_mempool_info()
+                    net = await rpc.get_network_info()
+                    ts = int(time.time())
+                    # store metrics
+                    await cache.insert('Chain Height', ts, float(count or 0))
+                    await cache.insert('Mempool Tx', ts, float(mempool.get('size', 0) if isinstance(mempool, dict) else 0))
+                    await cache.insert('Connected Peers', ts, float(net.get('connections', 0) if isinstance(net, dict) else 0))
+
+                    # broadcast a compact metric message
+                    msg = {'type':'metric','metrics':{'Chain Height': count, 'Mempool Tx': mempool.get('size') if isinstance(mempool, dict) else 0, 'Connected Peers': net.get('connections') if isinstance(net, dict) else 0}, 'best_block_hash': best}
+                    try:
+                        await mgr.broadcast(json.dumps(msg))
+                    except Exception:
+                        # ignore broadcast errors
+                        pass
+                except Exception as e:
+                    logger.exception('Background poller error')
+                await asyncio.sleep(interval)
+
+        # start poller
+        app.state._poller_task = asyncio.create_task(poller())
         # Log the effective RPC endpoint (do not log credentials)
         logger.info("RPC endpoint: %s:%s ssl=%s", settings.RPC_HOST, settings.RPC_PORT, settings.USE_SSL)
         # Additional startup diagnostics
@@ -143,6 +208,12 @@ def create_app() -> FastAPI:
     async def shutdown_event():
         rpc: BitcoinRPCClient = app.state.rpc_client
         await rpc.close()
+        # cancel background task
+        try:
+            app.state._poller_task.cancel()
+        except Exception:
+            pass
+
 
     # mount static and include routers (use absolute path so script runs
     # correctly regardless of current working directory)
@@ -151,6 +222,19 @@ def create_app() -> FastAPI:
     from app.api.rest import router as rest_router
 
     app.include_router(rest_router)
+
+    @app.websocket('/ws')
+    async def websocket_endpoint(websocket: WebSocket):
+        mgr: 'ConnectionManager' = app.state.ws_manager
+        await mgr.connect(websocket)
+        try:
+            while True:
+                # keep connection open; server pushes messages
+                await websocket.receive_text()
+        except WebSocketDisconnect:
+            mgr.disconnect(websocket)
+        except Exception:
+            mgr.disconnect(websocket)
 
     @app.get("/")
     async def index(request: Request):
