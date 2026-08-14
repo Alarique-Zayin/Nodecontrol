@@ -44,13 +44,17 @@ function createCard(key, value) {
   container.appendChild(card);
 
   // init chart
-  const ctx = card.querySelector('canvas[data-spark]').getContext('2d');
+  const elm = card.querySelector('[data-spark]');
   const cfg = {
-    type: 'line',
-    data: { labels: Array(SERIES_LEN).fill(''), datasets: [{ data: [], borderColor: '#38bdf8', backgroundColor: 'rgba(56,189,248,0.08)', tension: 0.3, pointRadius: 0 }] },
-    options: { responsive: true, maintainAspectRatio: false, plugins:{legend:{display:false}}, scales:{x:{display:false}, y:{display:false}} }
+    chart: { type: 'area', height: 40, sparkline: { enabled: true } },
+    stroke: { curve: 'smooth', width: 2 },
+    series: [{ data: [] }],
+    colors: ['#38bdf8'],
+    fill: { opacity: 0.15 },
+    tooltip: { enabled: false }
   };
-  const chart = new Chart(ctx, cfg);
+  const chart = new ApexCharts(elm, cfg);
+  chart.render();
   charts.set(key, chart);
   return card;
 }
@@ -62,8 +66,7 @@ function updateCard(key, value) {
   pushSeries(key, typeof value === 'number' ? value : 0);
   const chart = charts.get(key);
   if (chart) {
-    chart.data.datasets[0].data = series[key].slice(-SERIES_LEN);
-    chart.update('none');
+    chart.updateSeries([{ data: series[key].slice(-SERIES_LEN) }], true);
   }
 }
 
@@ -96,9 +99,9 @@ async function fetchStatus() {
     let bestEl = document.getElementById('best-block');
     if (!bestEl) {
       bestEl = document.createElement('div');
-      bestEl.id = 'best-block';
-      bestEl.className = 'mt-4 text-sm text-gray-600 dark:text-gray-300 flex items-center gap-2';
-      bestEl.innerHTML = `<span class="truncate max-w-md" id="best-block-text">${truncateHash(best)}</span> <button id="best-copy" class="text-xs px-2 py-1 bg-gray-200 dark:bg-gray-700 rounded">Copy</button>`;
+        bestEl.id = 'best-block';
+        bestEl.className = 'mt-4 text-sm text-gray-600 dark:text-gray-300 flex items-center gap-2';
+        bestEl.innerHTML = `<span class="truncate max-w-md" id="best-block-text">${truncateHash(best)}</span> <button id="best-copy" class="text-xs px-2 py-1 bg-gray-200 dark:bg-gray-700 rounded">Copy</button>`;
       document.querySelector('main').prepend(bestEl);
       document.getElementById('best-copy').addEventListener('click', ()=>copyText(best));
     } else {
@@ -151,7 +154,22 @@ function initWS(){
       ws.onmessage = (ev)=>{
         try{
           const msg = JSON.parse(ev.data);
-          if (msg.type === 'metric') updateCard(msg.key, msg.value);
+          if (msg.type === 'metric'){
+            if(msg.metrics){
+              for(const [k,v] of Object.entries(msg.metrics)) updateCard(k, v);
+            }
+            if(msg.recent_blocks) {
+              const blocksList = document.getElementById('blocks-list');
+              blocksList.innerHTML = '';
+              msg.recent_blocks.slice(0,8).forEach(b=>{
+                const node = document.createElement('div');
+                node.className = 'p-2 bg-white dark:bg-gray-800 rounded flex items-center justify-between';
+                node.innerHTML = `<div class="flex items-center gap-3"><div class="text-sm font-medium truncate max-w-xs" title="${b.hash}">${truncateHash(b.hash)}</div><div class="text-xs text-gray-500 dark:text-gray-400">txs: ${b.tx_count}</div></div><div class="text-xs text-gray-400">${b.time ? new Date(b.time*1000).toLocaleTimeString() : ''}</div>`;
+                node.querySelector('.truncate')?.addEventListener('click', ()=>copyText(b.hash));
+                blocksList.appendChild(node);
+              });
+            }
+          }
         }catch(e){}
       };
       ws.onclose = ()=>{ console.debug('ws closed, reconnecting'); setTimeout(connect, retry); retry = Math.min(30000, retry*1.5); };

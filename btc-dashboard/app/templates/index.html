@@ -5,16 +5,26 @@
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>Bitcoin Node Dashboard</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
     <style>
+      :root{
+        --bg:#0f172a;
+        --card-bg:#0b1220;
+        --fg:#e6eef8;
+        --muted:#9aa6b2;
+      }
       /* small helper for metric sparklines */
       .spark-canvas { width:100% !important; height:30px !important; }
+      .search-box { max-width:360px; }
     </style>
   </head>
   <body class="bg-gray-100 text-gray-900 dark:bg-gray-900 dark:text-gray-100">
     <div class="max-w-6xl mx-auto p-4">
       <header class="flex items-center justify-between mb-4">
-        <h1 class="text-2xl font-semibold">Bitcoin Node Dashboard</h1>
+        <div class="flex items-center gap-4">
+          <h1 class="text-2xl font-semibold">Bitcoin Node Dashboard</h1>
+          <input id="global-search" placeholder="Search block hash / txid" class="search-box px-3 py-1 rounded bg-white dark:bg-gray-800 text-sm" />
+        </div>
         <div class="flex items-center gap-3">
           <button id="theme-toggle" aria-label="Toggle dark mode" class="px-3 py-1 bg-gray-200 dark:bg-gray-800 rounded">Toggle</button>
           <div id="status-pill" class="flex items-center gap-2">
