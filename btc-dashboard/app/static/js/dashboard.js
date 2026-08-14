@@ -142,6 +142,25 @@ function initThemeToggle(){
   });
 }
 
+// Wire search box to call /api/v1/search and show simple alert with results
+function initSearch(){
+  const input = document.getElementById('global-search');
+  if(!input) return;
+  input.addEventListener('keydown', async (e)=>{
+    if(e.key !== 'Enter') return;
+    const q = input.value.trim();
+    if(!q) return;
+    try{
+      const res = await fetch('/api/v1/search?q='+encodeURIComponent(q));
+      if(!res.ok) { alert('Not found or error'); return; }
+      const data = await res.json();
+      alert(JSON.stringify(data, null, 2));
+    }catch(err){
+      alert('Search error');
+    }
+  });
+}
+
 // WebSocket stub for real-time updates (reconnects)
 function initWS(){
   const url = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws';
@@ -182,6 +201,7 @@ function initWS(){
 window.addEventListener('load', () => {
   initThemeToggle();
   initWS();
+  initSearch();
   fetchStatus();
   setInterval(fetchStatus, 3000);
 });
