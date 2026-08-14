@@ -184,7 +184,18 @@ def create_app() -> FastAPI:
                     await cache.insert('Connected Peers', ts, float(net.get('connections', 0) if isinstance(net, dict) else 0))
 
                     # broadcast a compact metric message
-                    msg = {'type':'metric','metrics':{'Chain Height': count, 'Mempool Tx': mempool.get('size') if isinstance(mempool, dict) else 0, 'Connected Peers': net.get('connections') if isinstance(net, dict) else 0}, 'best_block_hash': best}
+                    # include recent blocks in broadcast
+                    recent_blocks = []
+                    try:
+                        for i in range(0, 6):
+                            h = await rpc.get_block_hash(count - i)
+                            b = await rpc.get_block(h, 1)
+                            tx_count = len(b.get('tx', [])) if isinstance(b.get('tx', []), list) else 0
+                            recent_blocks.append({'hash': h, 'tx_count': tx_count, 'time': b.get('time')})
+                    except Exception:
+                        recent_blocks = []
+
+                    msg = {'type':'metric','metrics':{'Chain Height': count, 'Mempool Tx': mempool.get('size') if isinstance(mempool, dict) else 0, 'Connected Peers': net.get('connections') if isinstance(net, dict) else 0}, 'best_block_hash': best, 'recent_blocks': recent_blocks}
                     try:
                         await mgr.broadcast(json.dumps(msg))
                     except Exception:
