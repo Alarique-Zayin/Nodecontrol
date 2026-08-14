@@ -133,3 +133,9 @@ class BitcoinRPCClient:
     async def get_peer_info(self) -> Any:
         return await self._with_retries("getpeerinfo")
 
+    async def get_block_hash(self, height: int) -> str:
+        return await self._with_retries("getblockhash", [height])
+
+    async def get_block(self, block_identifier: str, verbosity: int = 1) -> Any:
+        return await self._with_retries("getblock", [block_identifier, verbosity])
+
