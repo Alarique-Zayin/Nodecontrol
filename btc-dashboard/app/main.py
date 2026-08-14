@@ -13,6 +13,7 @@ from fastapi.templating import Jinja2Templates
 import uvicorn
 import sys
 from pathlib import Path
+from logging.handlers import RotatingFileHandler
 
 # When running this file directly (python app/main.py), the package
 # imports like `from app.config import ...` can fail because the
@@ -55,14 +56,14 @@ def create_app() -> FastAPI:
         ch.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
         logger.addHandler(ch)
 
-        # file handler with JSON formatter
+        # file handler with JSON formatter + rotation
         logs_dir = project_root / "logs"
         os.makedirs(logs_dir, exist_ok=True)
-        fh = logging.FileHandler(logs_dir / "app.log")
-        fh.setLevel(logging.INFO)
+        rfh = RotatingFileHandler(logs_dir / "app.log", maxBytes=10 * 1024 * 1024, backupCount=5)
+        rfh.setLevel(logging.INFO)
         json_formatter = jsonlogger.JsonFormatter('%(asctime)s %(levelname)s %(name)s %(message)s %(request_id)s')
-        fh.setFormatter(json_formatter)
-        logger.addHandler(fh)
+        rfh.setFormatter(json_formatter)
+        logger.addHandler(rfh)
 
     app.state.logger = logger
 
@@ -130,6 +131,13 @@ def create_app() -> FastAPI:
             cookie_path=settings.RPC_COOKIE_PATH,
             use_ssl=settings.USE_SSL,
         )
+        # Log the effective RPC endpoint (do not log credentials)
+        logger.info("RPC endpoint: %s:%s ssl=%s", settings.RPC_HOST, settings.RPC_PORT, settings.USE_SSL)
+        # Additional startup diagnostics
+        try:
+            logger.info("POLL_INTERVAL=%s REDIS_URL_SET=%s", settings.POLL_INTERVAL, bool(getattr(settings, 'REDIS_URL', None)))
+        except Exception:
+            logger.info("POLL_INTERVAL/REDIS diagnostics not available in settings")
 
     @app.on_event("shutdown")
     async def shutdown_event():
