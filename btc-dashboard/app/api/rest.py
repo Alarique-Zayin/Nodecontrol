@@ -80,13 +80,14 @@ async def search(request: Request, q: str):
         if q.isdigit():
             height = int(q)
             h = await rpc.get_block_hash(height)
-            b = await rpc.get_block(h, 1)
+            # include tx details where available for richer UI
+            b = await rpc.get_block(h, 2)
             return JSONResponse({"type": "block", "block": b})
 
         # 64 hex chars -> block hash
         if len(q) == 64 and all(c in '0123456789abcdefABCDEF' for c in q):
             try:
-                b = await rpc.get_block(q, 1)
+                b = await rpc.get_block(q, 2)
                 return JSONResponse({"type": "block", "block": b})
             except Exception:
                 return JSONResponse({"error": "block not found"}, status_code=404)

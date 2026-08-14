@@ -237,21 +237,61 @@ def create_app() -> FastAPI:
     @app.websocket('/ws')
     async def websocket_endpoint(websocket: WebSocket):
         mgr: 'ConnectionManager' = app.state.ws_manager
+        settings = app.state.settings
+
+        # Simple token-based auth (optional). If WS_TOKEN is set, require it as ?token=... on the WebSocket URL
+        token = websocket.query_params.get('token')
+        if getattr(settings, 'WS_TOKEN', None):
+            if not token or token != settings.WS_TOKEN:
+                await websocket.close(code=1008)
+                return
+
         await mgr.connect(websocket)
+        last_pong = time.time()
+
+        async def ping_loop():
+            try:
+                while True:
+                    await websocket.send_text(json.dumps({'type': 'ping', 'ts': int(time.time())}))
+                    # close if no pong in 60s
+                    await asyncio.sleep(20)
+                    if time.time() - last_pong > 60:
+                        try:
+                            await websocket.close()
+                        except Exception:
+                            pass
+                        break
+            except Exception:
+                pass
+
+        ping_task = asyncio.create_task(ping_loop())
+
         try:
             while True:
-                # keep connection open; server pushes messages
-                await websocket.receive_text()
+                data = await websocket.receive_text()
+                try:
+                    payload = json.loads(data)
+                    if payload.get('type') == 'pong':
+                        last_pong = time.time()
+                except Exception:
+                    # ignore non-json messages
+                    pass
         except WebSocketDisconnect:
             mgr.disconnect(websocket)
         except Exception:
             mgr.disconnect(websocket)
+        finally:
+            try:
+                ping_task.cancel()
+            except Exception:
+                pass
 
     @app.get("/")
     async def index(request: Request):
         # Render the template via Jinja2Templates (now using a no-cache env).
         # Note: TemplateResponse expects (request, name, context).
-        return templates.TemplateResponse(request, "index.html")
+        # pass server WS token to client (may be empty)
+        return templates.TemplateResponse("index.html", {"request": request, "WS_TOKEN": settings.WS_TOKEN or ""})
 
     return app
 

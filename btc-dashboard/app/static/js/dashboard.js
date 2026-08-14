@@ -49,8 +49,8 @@ function createCard(key, value) {
     chart: { type: 'area', height: 40, sparkline: { enabled: true } },
     stroke: { curve: 'smooth', width: 2 },
     series: [{ data: [] }],
-    colors: ['#38bdf8'],
-    fill: { opacity: 0.15 },
+    colors: ['#60a5fa'],
+    fill: { type: 'gradient', gradient: { shade: 'light', type: 'vertical', shadeIntensity: 0.6, opacityFrom: 0.35, opacityTo: 0.05 } },
     tooltip: { enabled: false }
   };
   const chart = new ApexCharts(elm, cfg);
@@ -154,16 +154,56 @@ function initSearch(){
       const res = await fetch('/api/v1/search?q='+encodeURIComponent(q));
       if(!res.ok) { alert('Not found or error'); return; }
       const data = await res.json();
-      alert(JSON.stringify(data, null, 2));
+      showSearchResult(data);
     }catch(err){
       alert('Search error');
     }
   });
 }
 
+function showSearchResult(data){
+  const modal = document.getElementById('search-modal');
+  const body = document.getElementById('search-result-body');
+  if(!modal || !body) { alert(JSON.stringify(data)); return; }
+  body.innerHTML = '';
+  if(data.type === 'block' && data.block){
+    const b = data.block;
+    const h = document.createElement('div');
+    h.className = 'mb-2';
+    h.innerHTML = `<div class="text-sm text-gray-500 dark:text-gray-400">Height: ${b.height ?? '-'} · Time: ${b.time ? new Date(b.time*1000).toLocaleString() : '-'} · Txs: ${b.nTx ?? (b.tx ? b.tx.length : '-')}</div><div class="font-mono break-words mt-1">${b.hash}</div>`;
+    body.appendChild(h);
+
+    // tx list (if present)
+    const txs = b.tx || [];
+    const list = document.createElement('div');
+    list.className = 'space-y-1 mt-2';
+    const maxShow = 50;
+    txs.slice(0, maxShow).forEach((tx, idx)=>{
+      const txid = (typeof tx === 'string') ? tx : (tx.txid || tx.hash || tx.wtxid || tx.hex || '');
+      const el = document.createElement('div');
+      el.className = 'flex items-center justify-between gap-2';
+      const link = `https://blockstream.info/tx/${txid}`;
+      el.innerHTML = `<a class="text-xs text-blue-600 dark:text-blue-400 truncate" href="${link}" target="_blank" rel="noopener noreferrer">${txid}</a><div class="text-xs text-gray-500">${idx+1}</div>`;
+      list.appendChild(el);
+    });
+    if(txs.length > maxShow){
+      const more = document.createElement('div'); more.className='text-xs text-gray-500 mt-2'; more.textContent = `Showing ${maxShow}/${txs.length} txs`; body.appendChild(more);
+    }
+    body.appendChild(list);
+  } else if(data.error){
+    body.textContent = data.error;
+  } else {
+    body.textContent = JSON.stringify(data, null, 2);
+  }
+
+  modal.classList.remove('hidden');
+  document.getElementById('search-close').onclick = ()=>{ modal.classList.add('hidden'); };
+}
+
 // WebSocket stub for real-time updates (reconnects)
 function initWS(){
-  const url = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws';
+  const token = window.WS_TOKEN || '';
+  const url = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws' + (token ? '?token='+encodeURIComponent(token) : '');
   let ws;
   let retry = 1000;
   function connect(){
@@ -188,6 +228,9 @@ function initWS(){
                 blocksList.appendChild(node);
               });
             }
+          } else if(msg.type === 'ping'){
+            // respond with a pong
+            try{ ws.send(JSON.stringify({type:'pong', ts: msg.ts || Date.now()})); }catch(e){}
           }
         }catch(e){}
       };

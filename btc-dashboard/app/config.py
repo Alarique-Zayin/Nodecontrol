@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     POLL_INTERVAL: int = 2
     CORS_ORIGINS: str = "*"
     REDIS_URL: str | None = None
+    WS_TOKEN: str | None = None
 
     class Config:
         env_file = ".env"
